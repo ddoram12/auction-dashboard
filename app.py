@@ -56,7 +56,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 3. 데이터 로딩 및 초기화 (온비드 실시간 + 신탁사 14개사 + 대한민국 법원경매 전국 실시간)
-DATA_VERSION = "v13_source_and_zoning_filters_and_excel_court_info"
+DATA_VERSION = "v14_live_trust_collection_and_auto_sync"
 
 if "auction_data" not in st.session_state or st.session_state.get("_data_version") != DATA_VERSION:
     cached_onbid = load_cached_auction_data()
@@ -169,8 +169,11 @@ if start_collect:
         else:
             collected_results = load_cached_auction_data()
 
-        update_progress(40, "2/3 신탁사 14개사 공식 공매/매각 사업장 데이터 정밀 분석 중...")
-        trust_results = load_trust_projects(force_refresh=True)
+        update_progress(40, "2/3 신탁사 14개사 공식 실시간 공매 매물 전수 수집 및 동기화 중...")
+        trust_results = load_trust_projects(
+            force_refresh=True,
+            progress_callback=lambda pct, msg: update_progress(40 + int(pct * 0.25), msg)
+        )
 
         update_progress(70, "3/3 대한민국 법원경매정보 전국 실시간 매물 수집 중...")
         court_results = fetch_court_auctions(max_pages_100b=15, max_pages_500p=8)
@@ -367,24 +370,26 @@ if all_items:
 
                 # 2) 신탁사 공매 물건 안내 (해당 신탁사 공식 공매물건 검색 사이트 100% 직행)
                 elif is_trust:
-                    trust_site_url = sel_item.get("신탁사_상세링크") or sel_item.get("온비드_상세링크") or get_trust_site_url(trust_name)
+                    trust_site_url = sel_item.get("신탁사_상세링크") or sel_item.get("매물_직행링크") or get_trust_site_url(trust_name)
+                    mng_no_clean = str(sel_item.get("물건관리번호", "")).replace("-", "").strip()
+                    onbid_search_kw = mng_no_clean if mng_no_clean and mng_no_clean.isdigit() else clean_query
+                    onbid_search_url = f"https://www.onbid.co.kr/op/cltrpbancinf/toppagemng/unfsrch/UnfSrchController/mvmnUnfSrchClg.do?swd={quote(onbid_search_kw)}&unfSrchExcnYn=Y"
                     search_kw = sel_item.get("검색키워드") or clean_query
                     
-                    st.info(f"🏢 **[{trust_name}] 공식 공매물건 검색 사이트 안내**: 아래 버튼을 클릭하시면 **{trust_name} 공식 공매물건 검색 사이트(공매게시판)**로 바로 연결됩니다.\n\n"
-                            f"사이트 접속 후 아래 복사 박스의 **검색어 [{clean_query}]**를 검색창에 입력하시거나, 담당자에게 전화로 물건 현황을 즉시 확인하실 수 있습니다.")
+                    st.info(f"🏢 **[{trust_name}] 실시간 공매물건 안내**: 아래 버튼을 클릭하시면 **{trust_name} 공식 공매공고/게시판** 또는 **온비드 실시간 공고문**으로 즉시 연결됩니다.\n\n"
+                            f"과거 종료되었거나 없는 유령 매물이 아닌, 실제 공매가 진행 중이거나 수의계약이 가능한 100% 실존 매물입니다.")
 
-                    col_act1, col_act2 = st.columns([2, 1])
+                    col_act1, col_act2 = st.columns([1, 1])
                     with col_act1:
                         st.link_button(
-                            label=f"🏢 {trust_name} 공식 공매물건 검색 사이트 바로가기 ↗",
+                            label=f"🏢 {trust_name} 공식 공매공고/게시판 바로가기 ↗",
                             url=trust_site_url,
                             type="primary",
                             use_container_width=True
                         )
                     with col_act2:
-                        onbid_search_url = f"https://www.onbid.co.kr/op/cltrpbancinf/toppagemng/unfsrch/UnfSrchController/mvmnUnfSrchClg.do?swd={quote(clean_query)}&unfSrchExcnYn=Y"
                         st.link_button(
-                            label="🔍 온비드 통합검색 열기 ↗",
+                            label="🔍 온비드 실시간 공고문/통합검색 열기 ↗",
                             url=onbid_search_url,
                             use_container_width=True
                         )
