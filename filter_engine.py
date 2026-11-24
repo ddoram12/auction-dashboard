@@ -126,21 +126,33 @@ def apply_filters(
             if not matched_zone:
                 continue
 
-        # 8. 면적 필터 (평 단위)
+        # 8. 면적 필터 (평 단위) 및 9. 금액 필터 (억 원 단위)
         item_pyeong = item.get("면적(평)", 0.0) or 0.0
-        if min_area > 0 and item_pyeong < min_area:
-            continue
-        if max_area > 0 and item_pyeong > max_area:
-            continue
-
-        # 9. 금액 필터 (최초 입찰가 기준, 억 원 단위)
         item_price_won = item.get("최초입찰가_숫자", 0) or item.get("최저입찰가_숫자", 0) or 0
         item_price_eok = item_price_won / 100_000_000.0
 
-        if min_price_eok > 0 and item_price_eok < min_price_eok:
-            continue
-        if max_price_eok > 0 and item_price_eok > max_price_eok:
-            continue
+        # 직접 키워드 검색 중인 경우 (해당 단어가 물건명, 소재지, 번호에 직접 매칭된 경우 우선 노출)
+        is_direct_kw_match = bool(clean_keyword and (
+            clean_keyword in str(item.get("물건관리번호", "")).lower()
+            or clean_keyword in str(item.get("물건명", "")).lower()
+            or clean_keyword in str(item.get("소재지", "")).lower()
+        ))
+
+        if not is_direct_kw_match:
+            if min_area > 0 and item_pyeong < min_area:
+                continue
+            if max_area > 0 and item_pyeong > max_area:
+                continue
+            if min_price_eok > 0 and item_price_eok < min_price_eok:
+                continue
+            if max_price_eok > 0 and item_price_eok > max_price_eok:
+                continue
+        else:
+            # 직접 키워드 검색 시: 사용자가 면적/금액을 지정했을 때 명확히 범위를 벗어나는 경우만 제외 (미정인 경우는 보여줌)
+            if min_area > 0 and 0 < item_pyeong < min_area:
+                continue
+            if min_price_eok > 0 and 0 < item_price_eok < min_price_eok:
+                continue
 
         filtered.append(item)
 

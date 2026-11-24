@@ -56,7 +56,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 3. 데이터 로딩 및 초기화 (온비드 실시간 + 신탁사 14개사 + 대한민국 법원경매 전국 실시간)
-DATA_VERSION = "v14_live_trust_collection_and_auto_sync"
+DATA_VERSION = "v15_all_trust_comprehensive_pages_and_filters"
 
 if "auction_data" not in st.session_state or st.session_state.get("_data_version") != DATA_VERSION:
     cached_onbid = load_cached_auction_data()
@@ -126,23 +126,29 @@ with st.sidebar:
         placeholder="전체 용도지역 (선택 시 해당 용도만 필터링)"
     )
 
-    # 2-6) 면적 범위 검색 (디폴트 500평)
+    # 2-6) 면적 범위 검색 (디폴트 0평: 전체 매물 표출)
     st.markdown("**📐 면적 범위 (평)**")
     col_min, col_max = st.columns(2)
     with col_min:
-        min_area = st.number_input("최소 면적(평)", min_value=0.0, value=500.0, step=50.0)
+        min_area = st.number_input("최소 면적(평)", min_value=0.0, value=0.0, step=50.0, help="0 입력 시 면적 제한 없이 전체 매물 표시")
     with col_max:
         max_area = st.number_input("최대 면적(평)", min_value=0.0, value=0.0, step=100.0, help="0 입력 시 상한선 없이 무제한 검색")
-    st.caption("※ 500평 이상 개발부지 필터링 중")
+    if min_area > 0:
+        st.caption(f"※ {int(min_area)}평 이상 부지 필터링 중")
+    else:
+        st.caption("※ 전체 면적 매물 표시 중")
 
-    # 2-7) 금액 범위 검색 (최초 입찰가 기준, 억 원 단위, 디폴트 100억)
+    # 2-7) 금액 범위 검색 (최초 입찰가 기준, 억 원 단위, 디폴트 0억: 전체 매물 표출)
     st.markdown("**💰 최초 입찰가 범위 (억 원)**")
     col_p_min, col_p_max = st.columns(2)
     with col_p_min:
-        min_price_eok = st.number_input("최소 금액(억 원)", min_value=0.0, value=100.0, step=10.0, help="최초 입찰가(감정가) 기준 최소 금액입니다.")
+        min_price_eok = st.number_input("최소 금액(억 원)", min_value=0.0, value=0.0, step=10.0, help="0 입력 시 금액 제한 없이 전체 매물 표시")
     with col_p_max:
         max_price_eok = st.number_input("최대 금액(억 원)", min_value=0.0, value=0.0, step=50.0, help="0 입력 시 상한선 없이 무제한 검색")
-    st.caption(f"※ 감정가 기준 {int(min_price_eok):,}억 원 이상 부지 필터링 중")
+    if min_price_eok > 0:
+        st.caption(f"※ 감정가 기준 {int(min_price_eok):,}억 원 이상 부지 필터링 중")
+    else:
+        st.caption("※ 전체 가격대 매물 표시 중")
 
     st.divider()
     st.caption("온비드 + 신탁사 14개사 + 대법원 법원경매 전국 실시간 통합 DB 가동 중")
