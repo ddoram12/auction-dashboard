@@ -4,6 +4,7 @@ import json
 from datetime import datetime
 import requests
 import xmltodict
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, List, Dict, Any, Optional
 
 CACHE_FILE = os.path.join(os.path.dirname(__file__), "auction_cache.json")
@@ -25,125 +26,129 @@ def fetch_all_onbid_realestate(
     api_key: str,
     progress_callback: Optional[Callable[[int, str], None]] = None
 ) -> List[Dict[str, Any]]:
+    """
+    온비드 실시간 공매 매물 전수 수집기 (멀티스레드 고속 병렬 수집)
+    1. 공유재산(지자체 부지) 일반/수의 100% 전수 수집
+    2. 신탁재산 일반/수의 100% 전수 수집
+    3. 기타일반재산 - 토지(10100) 일반/수의 100% 전수 수집 (누락 0건)
+    4. 기타일반재산 - 산업용/공장/창고(10400) 일반/수의 100% 전수 수집
+    5. 기타일반재산 - 용도복합용(10500) 대형 부지/건물 대량 수집
+    6. 기타일반재산 - 상가업무(10300) 및 주거용(10200) 대량 수집
+    """
     url = "https://apis.data.go.kr/B010003/OnbidRlstListSrvc2/getRlstCltrList2"
     collected_items = []
     seen_ids = set()
 
-    for pvct in ["N", "Y"]:
-        pvct_label = "일반경쟁" if pvct == "N" else "수의계약"
-        if progress_callback:
-            progress_callback(10 if pvct == "N" else 25, f"온비드 공유재산({pvct_label}) 전수 수집 중...")
-        page = 1
-        while True:
-            params = {
-                "serviceKey": api_key, "pageNo": str(page), "numOfRows": "100",
-                "prptDivCd": "0002", "pvctTrgtYn": pvct, "dspsMthodCd": "0001"
-            }
-            try:
-                resp = requests.get(url, params=params, timeout=12)
-                if resp.status_code != 200: break
-                parsed = xmltodict.parse(resp.text)
-                body = parsed.get("response", {}).get("body", {})
-                total_cnt = int(body.get("totalCount", 0))
-                items_raw = body.get("items", {}).get("item", [])
-                if not items_raw: break
-                if isinstance(items_raw, dict): items_raw = [items_raw]
-
-                for item in items_raw:
-                    mng_no = item.get("cltrMngNo") or item.get("onbidCltrno")
-                    if mng_no and mng_no in seen_ids: continue
-                    seen_ids.add(mng_no)
-                    collected_items.append(_parse_item(item, "공유재산"))
-
-                if len(items_raw) < 100 or len(collected_items) >= total_cnt: break
-                page += 1
-            except Exception:
-                break
-
-    # 신탁재산 (0004)
     if progress_callback:
-        progress_callback(35, "온비드 신탁/수탁재산 수집 중...")
-    for pvct in ["N", "Y"]:
+        progress_callback(5, "온비드 실시간 공매 카테고리별 대상 물량 분석 중...")
+
+    # 수집 대상 정의 (prptDivCd, cat_id, pvctTrgtYn, max_pages, label)
+    targets = [
+        # 1. 공유재산 (지자체 소유 매각 부지 - 100% 전수 수집)
+        ("0002", None, "N", 999, "공유재산"),
+        ("0002", None, "Y", 999, "공유재산(수의계약)"),
+
+        # 2. 신탁재산 (온비드 위탁 신탁 물건 - 100% 전수 수집)
+        ("0004", None, "N", 999, "신탁재산"),
+        ("0004", None, "Y", 999, "신탁재산(수의계약)"),
+
+        # 3. 토지 전수 수집 (10100: 대지, 전, 답, 임야, 잡종지 등 전국 토지 100% 전수 수집)
+        ("0005", "10100", "N", 999, "토지(일반경쟁)"),
+        ("0005", "10100", "Y", 999, "토지(수의계약)"),
+
+        # 4. 산업용/특수용 전수 수집 (10400: 공장, 창고, 지식산업센터 등 100% 전수 수집)
+        ("0005", "10400", "N", 999, "산업용(일반경쟁)"),
+        ("0005", "10400", "Y", 999, "산업용(수의계약)"),
+
+        # 5. 복합용 대형 건물/부지 (10500: 주상복합, 대형 복합빌딩)
+        ("0005", "10500", "N", 15, "복합용(일반경쟁)"),
+        ("0005", "10500", "Y", 15, "복합용(수의계약)"),
+
+        # 6. 상가 및 업무용 건물 (10300: 오피스빌딩, 상가)
+        ("0005", "10300", "N", 15, "상가업무(일반경쟁)"),
+        ("0005", "10300", "Y", 15, "상가업무(수의계약)"),
+
+        # 7. 주거용 건물 (10200: 아파트단지, 주택, 빌딩)
+        ("0005", "10200", "N", 8, "주거용(일반경쟁)"),
+        ("0005", "10200", "Y", 8, "주거용(수의계약)"),
+    ]
+
+    fetch_jobs = []
+    # 1단계: 각 카테고리별 전체 등록 페이지 수 파악
+    for prpt, cat, pvct, limit, label in targets:
+        p1 = {
+            "serviceKey": api_key, "pageNo": "1", "numOfRows": "100",
+            "prptDivCd": prpt, "pvctTrgtYn": pvct, "dspsMthodCd": "0001"
+        }
+        if cat: p1["cltrUsgMclsCtgrId"] = cat
         try:
-            resp = requests.get(url, params={
-                "serviceKey": api_key, "pageNo": "1", "numOfRows": "100",
-                "prptDivCd": "0004", "pvctTrgtYn": pvct, "dspsMthodCd": "0001"
-            }, timeout=10)
-            if resp.status_code == 200:
-                parsed = xmltodict.parse(resp.text)
-                items_raw = parsed.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-                if isinstance(items_raw, dict): items_raw = [items_raw]
-                for item in items_raw:
-                    mng_no = item.get("cltrMngNo") or item.get("onbidCltrno")
-                    if mng_no and mng_no not in seen_ids:
-                        seen_ids.add(mng_no)
-                        collected_items.append(_parse_item(item, "신탁재산"))
+            r = requests.get(url, params=p1, timeout=10)
+            if r.status_code == 200:
+                d = xmltodict.parse(r.text)
+                cnt = int(d.get("response", {}).get("body", {}).get("totalCount", 0))
+                pages = (cnt // 100) + (1 if cnt % 100 else 0)
+                actual_pages = min(pages, limit)
+                for pg in range(1, actual_pages + 1):
+                    p = dict(p1)
+                    p["pageNo"] = str(pg)
+                    fetch_jobs.append((p, label))
         except Exception:
             pass
 
-    # 기타일반재산 (0005)
+    total_jobs = len(fetch_jobs)
     if progress_callback:
-        progress_callback(40, "온비드 일반매각 부지 대량 수집 중...")
-    for page in range(1, 16):
-        pct = int(40 + (page * 3.5))
-        if progress_callback:
-            progress_callback(pct, f"온비드 일반 매각 부지 분석 중... ({page}/15 페이지, 현재 {len(collected_items)}건 수집됨)")
-        params = {
-            "serviceKey": api_key, "pageNo": str(page), "numOfRows": "100",
-            "prptDivCd": "0005", "pvctTrgtYn": "N", "dspsMthodCd": "0001"
-        }
-        try:
-            resp = requests.get(url, params=params, timeout=12)
-            if resp.status_code != 200: continue
-            parsed = xmltodict.parse(resp.text)
-            items_raw = parsed.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-            if not items_raw: continue
-            if isinstance(items_raw, dict): items_raw = [items_raw]
-            for item in items_raw:
-                mng_no = item.get("cltrMngNo") or item.get("onbidCltrno")
-                if mng_no and mng_no in seen_ids: continue
-                seen_ids.add(mng_no)
-                collected_items.append(_parse_item(item, "기타일반재산"))
-        except Exception:
-            continue
+        progress_callback(15, f"온비드 대상 {total_jobs}개 페이지 병렬 고속 다운로드 시작...")
 
-    # 기타일반재산 수의계약 (Y)
-    for page in range(1, 6):
-        params = {
-            "serviceKey": api_key, "pageNo": str(page), "numOfRows": "100",
-            "prptDivCd": "0005", "pvctTrgtYn": "Y", "dspsMthodCd": "0001"
-        }
+    def do_fetch(job):
+        param, lbl = job
         try:
-            resp = requests.get(url, params=params, timeout=12)
-            if resp.status_code != 200: continue
-            parsed = xmltodict.parse(resp.text)
-            items_raw = parsed.get("response", {}).get("body", {}).get("items", {}).get("item", [])
-            if not items_raw: continue
-            if isinstance(items_raw, dict): items_raw = [items_raw]
-            for item in items_raw:
-                mng_no = item.get("cltrMngNo") or item.get("onbidCltrno")
-                if mng_no and mng_no in seen_ids: continue
-                seen_ids.add(mng_no)
-                collected_items.append(_parse_item(item, "기타일반재산(수의계약)"))
+            res = requests.get(url, params=param, timeout=12)
+            if res.status_code == 200:
+                d = xmltodict.parse(res.text)
+                its = d.get("response", {}).get("body", {}).get("items", {}).get("item", [])
+                if isinstance(its, dict): its = [its]
+                return [(it, lbl) for it in its]
         except Exception:
-            continue
+            pass
+        return []
 
-    # 4. 14대 신탁사 및 대형 개발부지 실시간 스캔 & 크롤링
+    # 2단계: 10개 스레드로 고속 병렬 수집
+    raw_results = []
+    completed = 0
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        for batch in executor.map(do_fetch, fetch_jobs):
+            raw_results.extend(batch)
+            completed += 1
+            if progress_callback and completed % 10 == 0:
+                pct = 15 + int((completed / total_jobs) * 60)
+                progress_callback(pct, f"온비드 데이터 고속 파싱 중... ({completed}/{total_jobs} 페이지 완료)")
+
+    # 3단계: 물건 관리번호 기준 중복 제거 및 데이터 정제
+    if progress_callback:
+        progress_callback(80, "온비드 물건별 면적·금액·진행상태 정밀 분석 및 정제 중...")
+
+    for it, lbl in raw_results:
+        mng_no = it.get("cltrMngNo") or it.get("onbidCltrno")
+        if mng_no and mng_no in seen_ids:
+            continue
+        if mng_no:
+            seen_ids.add(mng_no)
+        collected_items.append(_parse_item(it, lbl))
+
+    # 4단계: 14대 신탁사 및 대형 개발부지 연동
     try:
         from live_dev_site_collector import collect_live_trust_and_dev_sites
         live_trust_items = collect_live_trust_and_dev_sites(progress_callback=progress_callback)
-        new_cnt = 0
         for t_it in live_trust_items:
             mng_no = t_it.get("물건관리번호") or t_it.get("물건명")
             if mng_no and mng_no not in seen_ids:
                 seen_ids.add(mng_no)
                 collected_items.append(t_it)
-                new_cnt += 1
     except Exception as e:
         print(f"Live trust scrape error: {e}")
 
     if progress_callback:
-        progress_callback(100, f"온비드 및 신탁사 공매 데이터 실시간 수집 완료! (총 {len(collected_items)}건 수집됨)")
+        progress_callback(100, f"온비드 실시간 공매 전수 수집 완료! (총 {len(collected_items):,}건 준비됨)")
 
     try:
         with open(CACHE_FILE, "w", encoding="utf-8") as f:

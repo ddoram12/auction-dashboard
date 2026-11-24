@@ -56,7 +56,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 3. 데이터 로딩 및 초기화 (온비드 실시간 + 신탁사 14개사 + 대한민국 법원경매 전국 실시간)
-DATA_VERSION = "v15_all_trust_comprehensive_pages_and_filters"
+DATA_VERSION = "v16_onbid_full_parallel_and_all_trust_8397"
 
 if "auction_data" not in st.session_state or st.session_state.get("_data_version") != DATA_VERSION:
     cached_onbid = load_cached_auction_data()
