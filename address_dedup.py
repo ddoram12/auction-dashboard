@@ -82,8 +82,20 @@ def merge_and_deduplicate(
             target["세부상황"] = t_item.get("세부상황", "-")
             if t_item.get("매물_직행링크"):
                 target["매물_직행링크"] = t_item.get("매물_직행링크")
+            if t_item.get("신탁사_상세링크"):
+                target["신탁사_상세링크"] = t_item.get("신탁사_상세링크")
             if t_item.get("용도지역") and t_item.get("용도지역") != "-":
                 target["용도지역"] = t_item.get("용도지역")
+            if t_mng and t_mng != "-" and t_mng not in str(target.get("물건관리번호", "")):
+                target["물건관리번호"] = f"{target.get('물건관리번호', '')} / {t_mng}".strip(" /")
+            # 키워드 통합
+            merged_kw = f"{target.get('검색키워드', '')} {t_item.get('검색키워드', '')} {t_mng}".strip()
+            target["검색키워드"] = merged_kw
+            # 신탁사 필지 합산 면적이 더 클 경우(예: 외 7필지 등 일괄매각) 더 큰 전체 면적 반영
+            t_py = t_item.get("면적(평)", 0.0)
+            if t_py and t_py > target.get("면적(평)", 0.0):
+                target["면적(평)"] = t_py
+                target["면적(㎡)"] = t_item.get("면적(㎡)", target.get("면적(㎡)", 0.0))
             matched_trust_indices.add(t_idx)
         else:
             merged_list.append(dict(t_item))

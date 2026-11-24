@@ -102,8 +102,8 @@ def apply_filters(
             if is_valid and "진행중" in str(item.get("진행상태", "")):
                 continue
 
-        # 4. 다차원 키워드 검색 (물건명, 소재지, 관리번호, 용도/지목, 용도지역, 신탁사, 대리금융기관 등)
-        full_text = f"{item.get('물건명', '')} {item.get('소재지', '')} {item.get('물건관리번호', '')} {item.get('용도/지목', '')} {item.get('용도지역', '')} {item.get('시도', '')} {item.get('시군구', '')} {item.get('신탁사', '')} {item.get('대리금융기관', '')} {item.get('인허가번호', '')} {item.get('세부상황', '')}".lower()
+        # 4. 다차원 키워드 검색 (물건명, 소재지, 관리번호, 용도/지목, 용도지역, 신탁사, 대리금융기관, 사건번호, 검색키워드, 직행링크 등)
+        full_text = f"{item.get('물건명', '')} {item.get('소재지', '')} {item.get('물건관리번호', '')} {item.get('사건번호', '')} {item.get('관할법원', '')} {item.get('검색키워드', '')} {item.get('매물_직행링크', '')} {item.get('신탁사_상세링크', '')} {item.get('용도/지목', '')} {item.get('용도지역', '')} {item.get('시도', '')} {item.get('시군구', '')} {item.get('신탁사', '')} {item.get('대리금융기관', '')} {item.get('인허가번호', '')} {item.get('세부상황', '')}".lower()
         if clean_keyword and clean_keyword not in full_text:
             continue
 
