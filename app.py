@@ -60,7 +60,7 @@ DATA_VERSION = "v15_all_trust_comprehensive_pages_and_filters"
 
 if "auction_data" not in st.session_state or st.session_state.get("_data_version") != DATA_VERSION:
     cached_onbid = load_cached_auction_data()
-    trust_items = load_trust_projects(force_refresh=True)
+    trust_items = load_trust_projects(force_refresh=False)
     court_items = load_court_auctions(force_refresh=False)
     unified = merge_and_deduplicate(cached_onbid, trust_items, court_items)
     st.session_state["auction_data"] = unified
